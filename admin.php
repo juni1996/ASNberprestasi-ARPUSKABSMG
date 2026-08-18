@@ -552,7 +552,7 @@ $list_stat_penilaian = $stmt_stat->fetchAll();
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php $no = 1; foreach ($rekap as $peg): ?>
+                                    <?php $no = 1; foreach ($rekap_semua as $peg): ?>
                                         <?php $nip = $peg['nip']; $val_absen = $list_absen_existing[$nip] ?? ''; ?>
                                         <tr>
                                             <td><?= $no++ ?></td>
@@ -593,7 +593,7 @@ $list_stat_penilaian = $stmt_stat->fetchAll();
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php $no = 1; foreach ($rekap as $peg): ?>
+                                    <?php $no = 1; foreach ($rekap_semua as $peg): ?>
                                         <?php 
                                             $nip = $peg['nip'];
                                             $val_pt = $list_pt_existing[$nip]['point_tambahan'] ?? 0;
