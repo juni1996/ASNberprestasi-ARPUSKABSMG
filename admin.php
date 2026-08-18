@@ -217,8 +217,24 @@ foreach ($list_pt_raw as $row) {
     $list_pt_existing[$row['nip']] = $row;
 }
 
+// --- SYARAT MASUK PERANGKINGAN ---
+// Pegawai yang menilai kurang dari 30% total pegawai tetap dihitung penilaiannya
+// untuk pegawai lain, tetapi namanya tidak dimunculkan dalam daftar perangkingan.
+define('RASIO_MINIMAL_MENILAI', 0.30);
+
+$total_pegawai_semua = count($list_pegawai);
+$minimal_dinilai = $total_pegawai_semua * RASIO_MINIMAL_MENILAI;
+
+$stmt_menilai = $pdo->prepare("
+    SELECT nip_penilai, COUNT(DISTINCT nip_dinilai) AS jumlah_menilai
+    FROM penilaian
+    WHERE bulan = ? AND tahun = ?
+    GROUP BY nip_penilai
+");
+$stmt_menilai->execute([$bulan_pilih, $tahun_pilih]);
+$jumlah_menilai_per_nip = $stmt_menilai->fetchAll(PDO::FETCH_KEY_PAIR);
+
 // --- QUERY REKAPITULASI DENGAN PEMBOBOTAN ADIL (TOTAL MAKSIMAL = 100) ---
-// FILTER: Hanya penilaian dari penilai yang menilai > 30% dari total pegawai yang valid
 $sql_rekap = "
     SELECT 
         p.nip, p.nama, p.jabatan, p.pangkat,
@@ -249,15 +265,6 @@ $sql_rekap = "
     LEFT JOIN inovasi inv ON p.nip = inv.nip AND inv.bulan = ? AND inv.tahun = ?
     LEFT JOIN absensi abs ON p.nip = abs.nip AND abs.bulan = ? AND abs.tahun = ?
     LEFT JOIN point_atasan pt ON p.nip = pt.nip AND pt.bulan = ? AND pt.tahun = ?
-    WHERE
-        -- Keluarkan pegawai yang sebagai penilai hanya menilai ≤ 30% dari total pegawai
-        p.nip NOT IN (
-            SELECT DISTINCT nip_penilai
-            FROM penilaian
-            WHERE bulan = ? AND tahun = ?
-            GROUP BY nip_penilai
-            HAVING COUNT(DISTINCT nip_dinilai) <= (SELECT COUNT(*) FROM pegawai) * 0.30
-        )
     GROUP BY p.nip, p.nama, p.jabatan, p.pangkat, inv.nilai_pimpinan, abs.nilai_absen, pt.point_tambahan, pt.keterangan
     ORDER BY total_skor DESC
 ";
@@ -268,10 +275,21 @@ $stmt_rekap->execute([
     $bulan_pilih, $tahun_pilih,
     $bulan_pilih, $tahun_pilih,
     $bulan_pilih, $tahun_pilih, 
-    $bulan_pilih, $tahun_pilih, 
     $bulan_pilih, $tahun_pilih
 ]);
-$rekap = $stmt_rekap->fetchAll();
+$rekap_semua = $stmt_rekap->fetchAll();
+
+// Pisahkan pegawai yang berhak masuk perangkingan dan yang dikecualikan
+$rekap = [];
+$rekap_dikecualikan = [];
+foreach ($rekap_semua as $row) {
+    $row['jumlah_menilai'] = (int)($jumlah_menilai_per_nip[$row['nip']] ?? 0);
+    if ($row['jumlah_menilai'] >= $minimal_dinilai) {
+        $rekap[] = $row;
+    } else {
+        $rekap_dikecualikan[] = $row;
+    }
+}
 
 // FETCH DATA INOVASI
 $sql_inov = "
@@ -376,7 +394,7 @@ $list_stat_penilaian = $stmt_stat->fetchAll();
                 </div>
                 <div class="card-body">
                     <div class="alert alert-info">
-                        <small><strong>⚠️ Catatan:</strong> Hanya penilaian dari pegawai yang telah menilai lebih dari 30% dari total pegawai yang digunakan dalam ranking ini. Pegawai yang hanya menilai ≤ 30% pegawai lain akan dikeluarkan. Kriteria ini untuk memastikan validitas penilaian 360 derajat.</small>
+                        <small><strong>⚠️ Catatan:</strong> Penilaian yang diberikan setiap pegawai tetap dihitung untuk skor pegawai lain. Namun pegawai yang menilai kurang dari <?= (int)(RASIO_MINIMAL_MENILAI * 100) ?>% dari total pegawai (minimal <?= ceil($minimal_dinilai) ?> dari <?= $total_pegawai_semua ?> pegawai) tidak dicantumkan dalam perangkingan ini, meskipun skornya masuk 10 besar. Kriteria ini untuk memastikan validitas penilaian 360 derajat.</small>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-striped table-hover align-middle">
@@ -421,6 +439,33 @@ $list_stat_penilaian = $stmt_stat->fetchAll();
                             </tbody>
                         </table>
                     </div>
+
+                    <?php if (!empty($rekap_dikecualikan)): ?>
+                    <h6 class="fw-bold mt-4">Tidak Masuk Perangkingan (kurang dari <?= (int)(RASIO_MINIMAL_MENILAI * 100) ?>% penilaian)</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered align-middle text-muted">
+                            <thead class="table-secondary">
+                                <tr class="text-center">
+                                    <th class="text-start">Pegawai</th>
+                                    <th>Jumlah Pegawai Dinilai</th>
+                                    <th>Total Skor</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($rekap_dikecualikan as $r): ?>
+                                <tr>
+                                    <td>
+                                        <strong><?= htmlspecialchars($r['nama']) ?></strong><br>
+                                        <small>NIP: <?= htmlspecialchars($r['nip']) ?></small>
+                                    </td>
+                                    <td class="text-center"><?= $r['jumlah_menilai'] ?> / <?= $total_pegawai_semua ?></td>
+                                    <td class="text-center"><?= $r['total_skor'] ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -507,7 +552,7 @@ $list_stat_penilaian = $stmt_stat->fetchAll();
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php $no = 1; foreach ($rekap as $peg): ?>
+                                    <?php $no = 1; foreach ($rekap_semua as $peg): ?>
                                         <?php $nip = $peg['nip']; $val_absen = $list_absen_existing[$nip] ?? ''; ?>
                                         <tr>
                                             <td><?= $no++ ?></td>
@@ -548,7 +593,7 @@ $list_stat_penilaian = $stmt_stat->fetchAll();
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php $no = 1; foreach ($rekap as $peg): ?>
+                                    <?php $no = 1; foreach ($rekap_semua as $peg): ?>
                                         <?php 
                                             $nip = $peg['nip'];
                                             $val_pt = $list_pt_existing[$nip]['point_tambahan'] ?? 0;
