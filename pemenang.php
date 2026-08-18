@@ -97,6 +97,13 @@ if ($is_pengumuman_open) {
                 , 2) AS total_skor
 
             FROM pegawai p
+            /* Pegawai yang menilai kurang dari 30% total pegawai tidak masuk perangkingan,
+               meskipun penilaian yang ia berikan tetap dihitung untuk pegawai lain */
+            WHERE (
+                SELECT COUNT(DISTINCT pnc.nip_dinilai)
+                FROM penilaian pnc
+                WHERE pnc.nip_penilai = p.nip AND pnc.bulan = :b5 AND pnc.tahun = :t5
+            ) >= (SELECT COUNT(*) FROM pegawai) * 0.30
             ORDER BY total_skor DESC, p.nama ASC
             LIMIT 3
         ";
@@ -107,7 +114,8 @@ if ($is_pengumuman_open) {
             ':b2' => $bulan_aktif, ':t2' => $tahun_aktif,
             ':b3' => $bulan_aktif, ':t3' => $tahun_aktif,
             ':max_absen' => $nilai_maksimal_aktif,
-            ':b4' => $bulan_aktif, ':t4' => $tahun_aktif
+            ':b4' => $bulan_aktif, ':t4' => $tahun_aktif,
+            ':b5' => $bulan_aktif, ':t5' => $tahun_aktif
         ]);
         $top3 = $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
