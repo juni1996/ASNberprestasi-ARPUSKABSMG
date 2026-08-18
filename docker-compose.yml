@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: php7_app
+    ports:
+      - "8080:80"
+    volumes:
+      - .:/var/www/html
+    depends_on:
+      - mariadb
+    links:
+      - mariadb
+    restart: always
+    networks:
+      - app-network
+
+  mariadb:
+    image: mariadb:latest
+    container_name: mariadb_db
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: dbasn
+      MYSQL_USER: dbasnuser
+      MYSQL_PASSWORD: dbasn123
+    ports:
+      - "3307:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./dbasn.sql:/docker-entrypoint-initdb.d/dbasn.sql
+    restart: always
+    networks:
+      - app-network
+
+volumes:
+  mariadb_data:
+
+networks:
+  app-network:
