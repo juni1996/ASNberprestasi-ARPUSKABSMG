@@ -74,7 +74,9 @@ if (isset($_POST['simpan_inovasi']) && $penilai) {
 }
 
 // Navigasi
-if (isset($_POST['navigasi'])) {
+if (isset($_POST['jump_index'])) {
+    $_SESSION['page_index'] = (int)$_POST['jump_index'];
+} elseif (isset($_POST['navigasi'])) {
     if ($_POST['navigasi'] === 'next') $_SESSION['page_index']++;
     elseif ($_POST['navigasi'] === 'prev') $_SESSION['page_index'] = max(0, $_SESSION['page_index'] - 1);
 }
@@ -103,7 +105,6 @@ if (isset($_POST['simpan_single_penilaian']) && $penilai && $is_akses_dibuka) {
             ]);
 
             $message = '<div class="alert alert-success">Penilaian berhasil disimpan!</div>';
-            if (isset($_POST['auto_next'])) $_SESSION['page_index']++;
         } catch (Exception $e) {
             $message = '<div class="alert alert-danger">Gagal menyimpan: ' . $e->getMessage() . '</div>';
         }
@@ -127,9 +128,17 @@ if ($penilai) {
         $_SESSION['step_inovasi_done'] = true;
     }
 
-    // Ambil daftar pegawai selain penilai
-    $stmt_list = $pdo->prepare("SELECT * FROM pegawai WHERE nip != ? ORDER BY nama ASC");
-    $stmt_list->execute([$penilai['nip']]);
+    // Ambil daftar pegawai selain penilai yang belum dinilai pada periode ini
+    $stmt_list = $pdo->prepare("
+        SELECT * FROM pegawai
+        WHERE nip != ?
+        AND nip NOT IN (
+            SELECT nip_dinilai FROM penilaian
+            WHERE nip_penilai = ? AND bulan = ? AND tahun = ?
+        )
+        ORDER BY nama ASC
+    ");
+    $stmt_list->execute([$penilai['nip'], $penilai['nip'], $bulan_dinilai, $tahun_dinilai]);
     $pegawai_list = $stmt_list->fetchAll();
 
     // Ambil rekap penilaian penilai
@@ -138,8 +147,15 @@ if ($penilai) {
     $existing_nilai = $stmt_nilai->fetchAll(PDO::FETCH_UNIQUE | PDO::FETCH_ASSOC);
 
     $total_pegawai = count($pegawai_list);
-    if ($total_pegawai > 0 && $_SESSION['page_index'] >= $total_pegawai) {
-        $_SESSION['page_index'] = $total_pegawai - 1;
+    if ($total_pegawai > 0) {
+        if ($_SESSION['page_index'] >= $total_pegawai) {
+            $_SESSION['page_index'] = $total_pegawai - 1;
+        }
+        if ($_SESSION['page_index'] < 0) {
+            $_SESSION['page_index'] = 0;
+        }
+    } else {
+        $_SESSION['page_index'] = 0;
     }
     $pegawai_aktif = $pegawai_list[$_SESSION['page_index']] ?? null;
 }
@@ -251,6 +267,19 @@ if ($penilai) {
             </div>
         <?php else: ?>
 
+            <?php if (empty($pegawai_list)): ?>
+                <div class="card shadow-sm mb-4 border-success">
+                    <div class="card-body text-center py-5">
+                        <div class="mb-3">
+                            <span class="badge bg-success fs-5 p-3 rounded-circle">✓</span>
+                        </div>
+                        <h4 class="fw-bold text-success mb-2">Seluruh Pegawai Telah Dinilai!</h4>
+                        <p class="text-muted">Terima kasih, Anda telah menyelesaikan seluruh penilaian pegawai untuk periode ini.</p>
+                        <button class="btn btn-sm btn-outline-secondary mt-2" onclick="location.reload()">Ubah Inovasi Saya</button>
+                    </div>
+                </div>
+            <?php else: ?>
+
             <!-- NAVIGATION STATUS PEGAWAI -->
             <div class="card shadow-sm mb-4">
                 <div class="card-header bg-white d-flex justify-content-between align-items-center">
@@ -266,11 +295,11 @@ if ($penilai) {
                                 $btn_class = $is_current ? 'btn-primary' : ($is_done ? 'btn-success' : 'btn-outline-secondary');
                             ?>
                             <form method="POST" class="d-inline">
+                                <input type="hidden" name="jump_index" value="<?= $idx ?>">
                                 <button type="submit" name="navigasi" value="jump" class="btn btn-sm <?= $btn_class ?>">
                                     <?= ($idx + 1) ?>. <?= htmlspecialchars(explode(',', $p['nama'])[0]) ?>
                                     <?php if ($is_done): ?> ✓ <?php endif; ?>
                                 </button>
-                                <?php if ($is_current) $_SESSION['page_index'] = $idx; ?>
                             </form>
                         <?php endforeach; ?>
                     </div>
@@ -362,6 +391,7 @@ if ($penilai) {
                         </form>
                     </div>
                 </div>
+            <?php endif; ?>
             <?php endif; ?>
         <?php endif; ?>
     <?php endif; ?>
